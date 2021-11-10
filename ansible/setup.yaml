@@ -1,0 +1,83 @@
+---
+- name: Setup Postgre
+  hosts: 127.0.0.1
+  connection: local
+  environment:
+    PGDATA: "/postgres_data"
+    DB_USER: app
+    DB_PW: 123
+    DB_NAME: app_db
+  tasks:
+    - name: "Install packages"
+      shell: apt-get install -y postgresql postgresql-client postgresql-contrib
+
+    - name: "Prepare data directory"
+      shell: |
+        mkdir -p $PGDATA
+        chown -R postgres:postgres $PGDATA
+        mv /var/lib/postgresql/11/main $PGDATA
+        pg_conftool set data_directory $PGDATA/main
+
+    - name: "Update connection config"
+      shell: |
+        echo "host all  all    0.0.0.0/0  md5" >> /etc/postgresql/11/main/pg_hba.conf
+        pg_conftool set listen_addresses '*'
+      become: yes
+      become_user: postgres
+      become_method: su
+
+    - name: "Temporarily start server"
+      systemd:
+        name: postgresql@11-main
+        state: started
+
+    - name: "Initialize PostgreSQL"
+      shell: |
+        psql --command "CREATE USER $DB_USER WITH SUPERUSER PASSWORD '$DB_PW';"
+        createdb -O $DB_USER $DB_NAME
+      become: yes
+      become_user: postgres
+      become_method: su
+
+- name: Setup Django
+  hosts: 127.0.0.1
+  connection: local
+  environment:
+    DJANGO_SUPERUSER_USERNAME: admin
+    DJANGO_SUPERUSER_PASSWORD: 123
+    DJANGO_SUPERUSER_EMAIL: admin@mail.com
+  tasks:
+    - name: "Install dependencies"
+      shell:
+        cmd: pip install -r requirements.txt
+        chdir: /code/server
+    - name: "Migrate"
+      shell:
+        cmd: python manage.py migrate
+        chdir: /code/server
+    - name: "Setup superuser"
+      shell:
+        cmd: python manage.py createsuperuser --noinput
+        chdir: /code/server
+    - name: "Copy service config"
+      copy:
+        src: /code/server/django.service
+        dest: /etc/systemd/system/django.service
+        mode: +x
+
+- name: Setup services
+  hosts: 127.0.0.1
+  connection: local
+  tasks:
+    - name: "Enable Postgres service"
+      systemd:
+        name: postgresql@11-main
+        state: stopped
+        enabled: true
+        daemon_reload: true
+    - name: "Enable Django service"
+      systemd:
+        name: django
+        state: stopped
+        enabled: true
+        daemon_reload: true
