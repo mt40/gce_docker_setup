@@ -2,4 +2,4 @@
 
 cd "$(dirname "$0")"
 
-python manage.py runserver 0:5000
+python manage.py runserver 0:5000 --noreload
